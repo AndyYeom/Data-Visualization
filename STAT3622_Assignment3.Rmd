@@ -1,0 +1,325 @@
+---
+title: "STAT3622_Assignment3"
+author: "Yeom Dongjun (3035666463)"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/andyyeom/Desktop/3-Sem2/STAT3622/HW3")
+library(dplyr)
+library(readr)
+library(ggcorrplot)
+library(ggplot2)
+library(tidyverse)
+library(ggfortify)
+library(caret)
+library(MASS)
+library(pROC)
+library(nnet)
+library(e1071)
+```
+
+# Question 1
+
+```{r}
+train_data <- read.csv("mnist_train.csv", nrows = 6000)
+test_data <- read.csv("mnist_test.csv", nrows = 1000)
+
+# using 4, 9, or 8
+train_data <- train_data[train_data$label %in% c(4, 8, 9), ]
+test_data <- test_data[test_data$label %in% c(4, 8, 9), ]
+
+# combine
+c_data <- bind_rows(train_data, test_data)
+c_data[, -1] <- c_data[, -1] / 255
+```
+
+For ease of computation, I only used 10% of the original data. The first 6,000 sample in the mnist_train.csv file has been employed as training. Likewise, the first 1,000 sample in the mnist_test.csv file were used as test.
+
+## PCA
+
+```{r}
+pca <- prcomp(c_data[, -1], rank. = 20)
+
+# first and second principal components
+PC <- data.frame(PC1 = pca$x[, 1], PC2 = pca$x[, 2], Label = c_data$label)
+
+# Create scatter plot of first vs second principal component
+ggplot(PC, aes(x = PC1, y = PC2, color = factor(Label))) +
+  geom_point(size = 0.5) +
+  labs(x = "First Score", y = "Second Score", 
+       color = "Digits", title = "Scatterplot of the First Score vs the Second Score")
+
+```
+
+According to the scatterplot, while each digit is clustered, digit 8 is distinctly set apart from other digits.
+
+# Question 2
+
+Now, I will focus on two digits 4 and 9.
+Then, I will perform i) LDA, ii) QDA and iii) Logistic regression for the two digits classification problem.
+
+```{r, warning=FALSE, message=FALSE}
+train_data_49 <- train_data[train_data$label %in% c(4, 9), ]
+test_data_49 <- test_data[test_data$label %in% c(4, 9), ]
+labels_train <- factor(train_data_49$label)
+labels_test <- factor(test_data_49$label)
+features_train <- train_data_49[, -1]
+features_test <- test_data_49[, -1]
+
+# remove constant features
+leave_var <- function(data, labels) {
+  ul <- unique(labels)
+  list_vars <- lapply(ul, function(l) {
+    which(apply(data[labels == l, ], 2, var) > 0)
+  })
+  common_features <- Reduce(intersect, list_vars)
+  return(data[, common_features, drop = FALSE])
+}
+clean_train <- leave_var(features_train, labels_train)
+clean_test <- features_test[, colnames(clean_train), drop = FALSE]
+
+# remove near features
+var_threshold <- 1e-10
+low_var_erase <- function(data) {
+  keep_vars <- apply(data, 2, function(column) var(column) >= var_threshold)
+  return(data[, keep_vars, drop = FALSE])
+}
+
+final_train <- low_var_erase(clean_train)
+final_test <- clean_test[, colnames(final_train), drop = FALSE]
+```
+
+## (i) LDA
+
+``` {r}
+lda_model <- lda(final_train, grouping = labels_train)
+lda_pred <- predict(lda_model, final_test)$class
+lda_prob <- predict(lda_model, final_test)$posterior[,2]
+lda_confusion <- table(Predicted = lda_pred, Actual = labels_test)
+print(lda_confusion)
+```
+
+## (ii) QDA
+
+``` {r}
+# Adjusting the train and test set
+final_train_qda <- scale(final_train)
+final_test_qda <- scale(final_test, center = attr(final_train_qda, "scaled:center"), scale = attr(final_train_qda, "scaled:scale"))
+svd_result <- svd(final_train_qda)
+t_var <- sum(svd_result$d^2)
+var_explained <- cumsum(svd_result$d^2) / t_var
+num_components <- which(var_explained >= 0.95)[1]
+train_qda <- final_train_qda %*% svd_result$v[, 1:num_components]
+test_qda <- final_test_qda %*% svd_result$v[, 1:num_components]
+
+qda_model <- qda(train_qda, grouping = labels_train)
+qda_pred <- predict(qda_model, test_qda)
+qda_prob <- qda_pred$posterior[,2]
+qda_cl <- qda_pred$class
+qda_confusion <- table(Predicted = qda_cl, Actual = labels_test)
+print(qda_confusion)
+```
+
+## (iii) Logistic Regression
+
+```{r, warning=FALSE}
+logistics_model <- train(final_train, labels_train, method = "glm", family = "binomial", trControl = trainControl(method = "none"))
+logistics_pred <- predict(logistics_model, final_test)
+logistics_prob <- predict(logistics_model, final_test, type = "prob")[,2]
+logistics_confusion <- table(Predicted = logistics_pred, Actual = labels_test)
+print(logistics_confusion)
+```
+
+## Accuracies and AUCs
+
+``` {r, message=FALSE}
+lda_acc <- sum(lda_pred == labels_test) / length(labels_test)
+qda_acc <- sum(diag(qda_confusion)) / sum(qda_confusion)
+logistics_acc <- accuracy <- sum(diag(logistics_confusion)) / sum(logistics_confusion)
+
+lda_roc <- roc(labels_test, lda_prob)
+lda_auc <- auc(lda_roc)
+
+qda_roc <- roc(labels_test, qda_prob)
+qda_auc <- auc(qda_roc)
+
+logistics_roc <- roc(labels_test, logistics_prob)
+logistics_auc <- auc(logistics_roc)
+
+print(paste("LDA Accuracy:", lda_acc, "AUC:", lda_auc))
+print(paste("QDA Accuracy:", qda_acc, "AUC:", qda_auc))
+print(paste("Logistic Regression Accuracy:", logistics_acc, "AUC:", logistics_auc))
+```
+
+The accuracy and AUC of each LDA, QDA, and logistic regression are shown above. LDA and QDA have shown the accuracy of 0.93 followed by Logistic regression with 0.90. Regardring AUC, LDA displays the largest value. Therefore, for the analysis without PCA, LDA has the best performance. This is further shown through ROC Curve as follows:
+
+## Plot ROC Curve
+
+``` {r, message=FALSE}
+plot(lda_roc, col = "red", main = "ROC Curves")
+plot(qda_roc, col = "blue", add = TRUE)
+plot(logistics_roc, col = "green", add = TRUE)
+legend("bottomright", legend = c("LDA", "QDA", "Logistic Regression"),
+       col = c("red", "blue", "green"), lty = 1)
+```
+
+# Question 3
+
+```{r, warning=FALSE, message=FALSE}
+c_pca <- data.frame(c_data$label, pca$x)
+colnames(c_pca)[1] <- "label"
+
+pca_train <- c_pca[1:nrow(train_data), ]
+pca_test <- c_pca[nrow(train_data)+1:nrow(test_data), ]
+
+pca_train <- pca_train[pca_train$label %in% c(4, 9),]
+pca_test <- pca_test[pca_test$label %in% c(4, 9),]
+```
+
+## (i) LDA
+
+```{r, warning=FALSE, message=FALSE}
+pca_lda_model <- lda(label ~ ., data = pca_train)
+pca_lda_pred <- predict(pca_lda_model, pca_test)
+pca_lda_auc <- roc(pca_test$label, pca_lda_pred$posterior[,2])
+pca_lda_confusion <- confusionMatrix(data = pca_lda_pred$class, reference = as.factor(pca_test$label))
+print(pca_lda_confusion$table)
+ 
+
+cat("LDA Accuracy:", pca_lda_confusion$overall['Accuracy'], "\n")
+cat("LDA AUC:", auc(pca_lda_auc), "\n")
+```
+
+## (ii) QDA
+
+```{r, warning=FALSE, message=FALSE}
+pca_qda_model <- qda(label ~ ., data = pca_train)
+pca_qda_pred <- predict(pca_qda_model, pca_test)
+pca_qda_auc <- roc(pca_test$label, pca_qda_pred$posterior[,2])
+pca_qda_confusion <- confusionMatrix(data = pca_qda_pred$class, reference = as.factor(pca_test$label))
+print(pca_qda_confusion$table)
+
+cat("QDA Accuracy:", pca_qda_confusion$overall['Accuracy'], "\n")
+cat("QDA AUC:", auc(pca_qda_auc), "\n")
+
+```
+
+## (iii) Logistic Regression
+
+```{r, warning=FALSE, message=FALSE}
+pca_logistic_model <- multinom(label ~ ., data = pca_train)
+pca_logistic_pred_probs <- predict(pca_logistic_model, newdata = pca_test[, -1], type = "probs")
+pca_logistic_pred <- predict(pca_logistic_model, pca_test, type = "probs")
+pca_logistic_p <- predict(pca_logistic_model, newdata = pca_test[, -1])
+pca_logistic_confusion <- confusionMatrix(data = factor(pca_logistic_p, levels = c("4", "9")),
+                                          reference = factor(pca_test$label, levels = c("4", "9")))
+print(pca_logistic_confusion$table)
+print(paste("Logistic Regression Accuracy:", pca_logistic_confusion$overall['Accuracy']))
+pca_logistic_auc <- roc(pca_test$label, pca_logistic_pred)
+cat("Logistic Regression AUC:", auc(pca_logistic_auc), "\n")
+```
+
+## Plot ROC Curve
+
+``` {r, message=FALSE}
+plot(pca_lda_auc, col = "red", main = "ROC Curves using PCA")
+plot(pca_qda_auc, add = TRUE, col = "blue")
+plot(pca_logistic_auc, add = TRUE, col = "green")
+legend("bottomright", legend = c("LDA", "QDA", "Logistic Regression"), col = c("red", "blue", "green"), lty = 1)
+```
+
+Regarding the analysis based on the top two PCA scores, QDA has shown the best performance with accuracy of 0.975 and AUC of 0.995. LDA had the smallest accuracy and AUC value among three methods, which contradicts with the observation from (2). However, accuracy and AUD of all three methods have genuinely increased, implying that PCA was effective and successfully chose the ideal features. The all three methods had accuracy and AUC above 0.95, suggesting that all of these models are well-performing.
+
+# Question 4
+
+```{r, warning=FALSE, message=FALSE}
+c_pca <- data.frame(c_data$label, pca$x)
+colnames(c_pca)[1] <- "label"
+
+pca_train <- c_pca[1:nrow(train_data), ]
+pca_test <- c_pca[nrow(train_data)+1:nrow(test_data), ]
+```
+
+## (i) LDA
+
+```{r, warning=FALSE, message=FALSE}
+LDA_model <- lda(label ~ ., data = pca_train)
+LDA_pred <- predict(LDA_model, pca_test)$class
+LDA_confusion <- confusionMatrix(data = factor(LDA_pred, levels = c("4", "8", "9")),
+                            reference = factor(pca_test$label, levels = c("4", "8", "9")))
+print(LDA_confusion$table)
+```
+
+## (ii) QDA
+```{r, warning=FALSE, message=FALSE}
+QDA_model <- qda(label ~ ., data = pca_train)
+QDA_pred <- predict(QDA_model, pca_test)$class
+QDA_confusion <- confusionMatrix(data = factor(QDA_pred, levels = c("4", "8", "9")),
+                            reference = factor(pca_test$label, levels = c("4", "8", "9")))
+print(QDA_confusion$table)
+```
+
+## (iii) Logistic Regression
+
+```{r, warning=FALSE, message=FALSE}
+                       
+LOGISTIC_model <- multinom(label ~ ., data = pca_train)
+LOGISTIC_pred <- predict(LOGISTIC_model, pca_test)
+LOGISTIC_confusion <- confusionMatrix(data = factor(LOGISTIC_pred, levels = c("4", "8", "9")),
+                              reference = factor(pca_test$label, levels = c("4", "8", "9")))
+print(LOGISTIC_confusion$table)
+```
+
+## (iv) SVM
+
+```{r, warning=FALSE, message=FALSE}
+pca_train$label <- as.factor(pca_train$label)
+pca_test$label <- as.factor(pca_test$label)
+
+svm_model <- svm(label ~ ., data = pca_train, cost = 10, gamma = 0.1, kernel = "radial", probability = TRUE)
+svm_pred <- predict(svm_model, pca_test)
+svm_confusion <- confusionMatrix(data = factor(svm_pred, levels = c("4", "8", "9")),
+                            reference = factor(pca_test$label, levels = c("4", "8", "9")))
+
+print(svm_confusion$table)
+```
+
+## Accuracies and AUCs
+
+```{r, warning=FALSE, message=FALSE}
+LDA_roc <- multiclass.roc(response = factor(pca_test[,1], ordered = TRUE), 
+                          predictor = factor(LDA_pred, ordered = TRUE), 
+                          plot = FALSE)
+LDA_auc <- LDA_roc$auc
+
+QDA_roc <- multiclass.roc(response = factor(pca_test[,1], ordered = TRUE), 
+                          predictor = factor(QDA_pred, ordered = TRUE), 
+                          plot = FALSE)
+QDA_auc <- QDA_roc$auc
+
+LOGISTIC_roc <- multiclass.roc(response = factor(pca_test[,1], ordered = TRUE), 
+                          predictor = factor(LOGISTIC_pred, ordered = TRUE), 
+                          plot = FALSE)
+LOGISTIC_auc <- LOGISTIC_roc$auc
+
+svm_roc <- multiclass.roc(response = factor(pca_test[,1], ordered = TRUE), 
+                          predictor = factor(svm_pred, ordered = TRUE), 
+                          plot = FALSE)
+svm_auc <- svm_roc$auc
+
+
+print(paste("LDA Accuracy:", LDA_confusion$overall['Accuracy']))
+print(paste("LDA AUC:", LDA_auc))
+print(paste("QDA Accuracy:", QDA_confusion$overall['Accuracy']))
+print(paste("QDA AUC:", QDA_auc))
+print(paste("Logistic Regression Accuracy:", LOGISTIC_confusion$overall['Accuracy']))
+print(paste("Logistic Regression AUC:", LOGISTIC_auc))
+print(paste("SVM Accuracy:", svm_confusion$overall['Accuracy']))
+print(paste("SVM AUC:", svm_auc))
+
+```
+
+Among the above 4 methods, SVM has shown the good result with the accuracy of 0.96 and AUC of 0.97. The second well-performing model is QDA, followed by Logistics Regression, and LDA. Hence, we can conclude that SVM has the best performance regarding the digits 4, 8, and 9.

@@ -1,0 +1,146 @@
+---
+title: "STAT3622_Assignment1"
+author: 'Yeom Dongjun (UID: 3035666463)'
+date: "2024-03-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/andyyeom/Desktop/3-Sem2/STAT3622/HW1")
+library(ggplot2)
+library(ggridges)
+library(dplyr)
+library(kableExtra)
+library(nycflights13)
+library(tidyr)
+```
+
+# Question 1
+
+```{r}
+ggplot(mpg, aes(x = displ, y = cty)) + 
+  geom_point() + 
+  facet_wrap(~class, nrow = 2)
+```
+The above is the plot faceted on *class*
+
+```{r}
+ggplot(mpg, aes(x = displ, y = cty, color = class)) + geom_point()
+```
+
+This is the plot drawn by using the color aesthetic instead of faceting.
+
+- Advantages and Disadvantages of Faceting:
+
+  Since it divides each class into its subplot, faceting has strength in its clear view of the patterns, allowing more straightforward interpretation and comparison within the same class. It can be efficient when the patterns between classes have significant differences. However, if the number of classes is large, the size of each graph may become smaller, leading to hardship in interpretation. Also, since each class is shown separately, comparing the overall patterns may be challenging.
+
+- Advantages and Disadvantages of Color Aesthetic:
+
+  Color aesthetic has strength in providing a quick overview of patterns in general since it allows the comparison of multiple classes within the same graph. However, it may be difficult to distinguish between classes if the number of classes is large or the colors are alike. Also, the identification of individual patterns within each class could be demanding.
+
+Regarding a larger dataset, the advantages and disadvantages of faceting and color aesthetics become more distinct. Faceting will become more complex with a multitude of classes or data points. On the other hand, while color aesthetic may also become challenging due to increased classes, it will still be able to give a swift overview of the general patterns.
+Therefore, depending on the dataset's nature and the visualization objective, the choice should be made.
+
+
+# Question 2
+
+## (1)
+
+```{r}
+mean(faithful$waiting)
+```
+
+The average waiting time between eruptions of the *Old Faithful* geyser in the data set *faithful* is 70.89706 minutes.
+
+## (2)
+
+```{r}
+faithful$eruptions[1:4]
+```
+
+The shown values above are the first four eruption durations in the *faithful* data set.
+
+## (3)
+
+```{r, echo = FALSE}
+d <- data.frame(head(faithful, 5))
+kbl <- knitr::kable(d, format = "pipe")
+kableExtra::kable_styling(kbl, full_width = FALSE)
+```
+
+The shown table above indicates the first five rows of the *faithful* data frame.
+
+## (4)
+
+```{r}
+hist(faithful$eruptions, main = "Histogram of Eruption Durations", 
+     xlab = "Eruption Durations")
+```
+
+This is the histogram of the eruption durations in the *faithful* data set.
+
+# Question 3
+
+```{r}
+murders <- read.csv("murders.csv")
+ggplot(murders) + 
+  geom_point(aes(x=population,y=total,color=region)) + 
+  xlab("Population") + 
+  ylab("Number of Murders") +
+  scale_x_log10() + 
+  scale_y_log10()
+```
+
+The scatter plot of the number of murders against population is shown above. Based on the scatter plot, we can notice that there is a positive correlation between number of murders and population. Moreover, the plot indicates that the southern region is likely to have a higher number of murders. 
+
+# Question 4
+
+## (1)
+
+```{r}
+flights %>% 
+  drop_na() %>% 
+  group_by(origin) %>% 
+  summarise(mean = mean(dep_delay), median = median(dep_delay)) %>% 
+  knitr::kable("pipe") %>%
+  kableExtra::kable_styling(full_width = F)
+```
+
+The table shown above indicates the average and median departure delays for each of the three New York City airports. In average, EWR showed a longest departure delays, while LGA showed a shortest. From the table, we can also notice the significance difference between the mean values and median values for all of the airports. Since the mean values are genuinely larger than the median values, we can assume that the departure delays' distribution is skewed to the right.
+
+## (2)
+
+**First Approach: Single Plot**
+
+```{r}
+ggplot(flights %>% drop_na()) + 
+  geom_density(aes(x = air_time, fill = origin, alpha = 0.1)) +
+  labs(x = "Air Time", y = "Density")
+```
+
+**Second Approach: Faceted Plot**
+
+```{r}
+ggplot(flights %>% drop_na()) +
+  geom_density(aes(x = air_time)) + 
+  labs(x = "Air Time", y = "Density") + 
+  facet_wrap(~origin)
+```
+
+**Third Approach: Ridge Line Plot**
+
+```{r, message = FALSE}
+ggplot(flights %>% drop_na()) +
+    geom_density_ridges(aes(x = air_time, y = origin, group = origin)) +
+    labs(x = "Air Time", y = "Origin") 
+```
+
+- Observed differences from the density plots:
+
+  The density plot reveals that LGA airport has the shortest flight durations and JFK airport shows the longest flight times, implying that LGA airport may primarily cater to domestic flights, while JFK airport may serve for the international airlines. For EWR airport, which is in between JFK and LGA airports, we can assume that it handles both international and domestic flights.
+
+- Advantages and disadvantages of all three approaches:
+  1. In the single plot, the three density plots are visulaized in the same space, which allows a straightforward comparison of the distributions among the three groups. However, the clarity of a specific group's density curve may be compromised due to the overlap.
+  2. In the faceted plot, each density plot is visualized on individual space, which allows for a clear examination of each airport's density curve specifics. However, since it is separately displayed, faceted plot is not suitable for comparative analysis.
+  3. In the ridge line plot, the strengths of the previous two approaches are combined. The comparison across groups is possible since the density curves are well aligned. Furthermore, the separation along the y-axis allows a detailed examination on the shape of each density curve.
